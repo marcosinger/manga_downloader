@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -38,25 +39,6 @@ func (m *Manga) FetchManga(out string) error {
 	}
 
 	return err
-}
-
-// buildImageName gets an image node and extract useful information about it,
-// like title, chapter number, page number and return a name with it
-func (m *Manga) buildImageName(imageNode *goquery.Selection) (name string, src string) {
-	alt, altExist := imageNode.Attr("alt")
-	src, srcExist := imageNode.Attr("src")
-
-	if !altExist || !srcExist {
-		return name, src
-	}
-
-	ext := path.Ext(src)
-	fields := strings.Fields(alt)
-	title := fields[0]
-	chapter := fmt.Sprintf("%05s", fields[1])
-	page := fmt.Sprintf("%05s", fields[4])
-
-	return fmt.Sprintf("%s-Chap-%s-Pg-%s%s", title, chapter, page, ext), src
 }
 
 // getChapters get page links for a specific chapter
@@ -135,7 +117,7 @@ func (m *Manga) fetchImages(done <-chan struct{}, pages <-chan string, images ch
 	for page := range pages {
 		doc, _ := goquery.NewDocument(page)
 		image := doc.Find(m.ImageNode).First()
-		name, src := m.buildImageName(image)
+		name, src := buildImageName(image)
 
 		select {
 		case images <- map[string]string{name: src}:
@@ -177,4 +159,29 @@ func (m *Manga) outputFunc(images <-chan map[string]string, out string) error {
 	}
 
 	return nil
+}
+
+type imageNode interface {
+	Attr(string) (string, bool)
+}
+
+// Regexp for match image name, chapter and page number
+var imageNameReg = regexp.MustCompile("([a-zA-Z-\\s]+)\\s(\\d+) - Page (\\d+)")
+
+// buildImageName gets an image node and extract useful information about it,
+// like title, chapter number, page number and return a name with it
+func buildImageName(node imageNode) (name string, src string) {
+	alt, altExist := node.Attr("alt")
+	src, srcExist := node.Attr("src")
+
+	if !altExist || !srcExist {
+		return name, src
+	}
+
+	fields := imageNameReg.FindStringSubmatch(alt)
+	title := strings.Replace(fields[1], " ", "-", -1)
+	chapter := fmt.Sprintf("%05s", fields[2])
+	page := fmt.Sprintf("%05s", fields[3])
+
+	return fmt.Sprintf("%s-Chap-%s-Pg-%s%s", title, chapter, page, path.Ext(src)), src
 }
